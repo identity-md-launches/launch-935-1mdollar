@@ -8,12 +8,24 @@ the constructor's `msg.sender`.
 **Launch constraint:** the supplied launch checks require the Uniswap v4
 PoolManager to settle the entire nominal transfer amount. A 99% transfer tax on
 that manager would break those checks and swaps. This implementation therefore
-taxes a **separate configured pool** and exempts transfers whose sender or
-recipient is the launch PoolManager. The constructor rejects using that manager
-as the taxed pool. The launch's v4 pool itself has **no token transfer tax**.
+taxes a **separate configured pool**. Transfers involving that pool are taxed
+even when the other endpoint is the launch PoolManager. The constructor rejects
+using that manager as the taxed pool. The launch's v4 pool itself has **no token
+transfer tax**.
 This is the explicit interpretation used to reconcile the request with the
 checks; it does not implement a 99% tax on the launch pool itself. Requiring that
 would need a change to the launch design and its acceptance checks.
+
+**Unresolved deployment requirement:** do not launch this as a token that taxes
+the v4 launch pool. The requester must resolve that scope conflict with the
+network, or explicitly accept the separate taxable venue before deployment.
+No production taxable venue was supplied. Test addresses such as `0x1001` are
+fixtures, not deployment parameters; a placeholder without a working venue
+does not deliver the requested pool economics. A buy-only manager tax would
+change the agreed two-direction policy and also tax manager withdrawals; it is
+not introduced by this revision. A pool-layer fee requires a different launch
+integration. There is no `launch.json` in this revision's input tree to validate
+or correct.
 
 ## Transfer behavior and assumptions
 
@@ -23,8 +35,8 @@ burn, redistribution, automatic swap, or conversion to ETH.
 
 | Transfer endpoints | Fee |
 | --- | --- |
-| Either endpoint is the configured launch PoolManager | 0, including transfers involving the taxable pool |
-| Otherwise, either endpoint is the configured taxable pool | 99% of gross amount, rounded down in minor units |
+| Either endpoint is the configured taxable pool, including a transfer to/from the launch PoolManager | 99% of gross amount, rounded down in minor units |
+| Launch PoolManager transfers with no taxable-pool endpoint | 0 |
 | All other endpoints | 0 |
 
 For a taxable transfer of `amount`, `fee = floor(amount * 9900 / 10000)`;
@@ -47,8 +59,9 @@ ordinary `Transfer` event is emitted.
 The token sees addresses, not swaps: adding/removing liquidity, donations and
 direct transfers involving the taxable pool also pay tax. Other pools are not
 automatically detected or taxed. The deployer has no special exemption at the
-taxable pool. Routing through the exempt manager or trading at other venues can
-avoid this fee; this is not a guarantee of a 99% tax on all market activity.
+taxable pool. Routing a taxable-pool transfer through the manager still pays
+the fee. Trading at other venues is untaxed; this is not a guarantee of a 99%
+tax on all market activity.
 
 The treasury receives ledger credits, with no external calls or recipient hooks.
 It can spend its own tokens using ordinary ERC-20 operations. There is no owner,
@@ -67,7 +80,7 @@ new OneMDollar(liquidityPool, feeRecipient, poolManager);
 | Argument | Required configuration |
 | --- | --- |
 | `liquidityPool` | Address of a separate pool whose integration supports fee-on-transfer tokens in both directions. Nonzero; distinct from this token, deployer, treasury and launch manager. |
-| `feeRecipient` | Treasury controlled by the intended fee beneficiary. Nonzero; distinct from this token, pool and manager. May be the deployer. |
+| `feeRecipient` | Treasury controlled by the intended fee beneficiary. Nonzero; distinct from this token, pool, manager and deployer. The deployment factory cannot receive fees. |
 | `poolManager` | The actual launch PoolManager, supplied by the deployment network (`$poolManager` in launch constructor arguments). Nonzero; distinct from this token and deployer. |
 
 Addresses are immutable and are not authenticated by the token. A constructor
@@ -76,6 +89,12 @@ used. The deployer must verify the network, address provenance, treasury control
 and actual pool integration before launch. No chain addresses, treasury address,
 taxed pool address, paired asset, opening price or allocation parameters were
 provided in this assignment; none have been invented for deployment.
+
+The deployer exclusion prevents fees being stranded in a launch factory that
+only distributes the initial supply. It also applies to direct EOA deployments:
+use a separate controlled treasury. Other recipient contracts are not checked
+for withdrawal support; verifying that the treasury can spend 1MD remains the
+operator's responsibility.
 
 A separately deployed pool may have a precomputed CREATE address that is
 independent of the token's creation bytecode. Reserve that address first, compute
@@ -130,7 +149,7 @@ implementation; Uniswap v4 and Solmate are used only by local integration tests.
 The delivered tests cover:
 
 - Metadata, complete constructor mint, invalid addresses and immutable settings.
-- Both tax directions, wallets, other venues, manager exemptions, treasury and
+- Both tax directions, wallets, other venues, taxable manager relays, treasury and
   self-transfer aliases, gross allowances, rounding, zero transfers and events.
 - Rejected transfers, insufficient gross balances/allowances, rollback, approval
   revocation, and attempts to mint, freeze, seize or reconfigure the token.
@@ -139,6 +158,8 @@ The delivered tests cover:
 - A real local Uniswap v4 PoolManager with a CREATE2 factory, single-sided
   seeding, ordinary-trader buys/sells for native and ERC-20 pairs, swarm claims,
   requester payouts, runtime size and forbidden-opcode checks.
+- Real manager `unlock`/`sync`/`settle`/`take` relays in both directions, checking
+  exact fees, net receipts, events and preservation of existing manager reserves.
 
 `test/LaunchCompatibility.t.sol` reproduces the relevant token properties from
 the pinned floor without environment variables. It is not a run of the original
@@ -154,7 +175,7 @@ The treasury custodian manages the fee proceeds. Liquidity providers and router
 operators must account for the 99% loss and use measured balance changes and
 appropriate minimum received amounts. The separately taxed venue must support
 fee-on-transfer tokens; the tested v4 launch is deliberately untaxed. Publish
-these economics and the exemption before users trade.
+these economics and the scope resolution before users trade.
 
 The launch operator must verify deployed source/constructor arguments and
 confirm all configured addresses and liquidity parameters. Changing the treasury,

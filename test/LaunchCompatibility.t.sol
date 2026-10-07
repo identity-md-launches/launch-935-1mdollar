@@ -43,6 +43,11 @@ contract LaunchCompatibilityTest is Test {
         assertEq(token.balanceOf(address(this)), 0);
     }
 
+    function test_factoryCannotBeFeeRecipient() public {
+        vm.expectRevert(OneMDollar.InvalidFeeRecipient.selector);
+        factory.deploy(POOL, address(factory));
+    }
+
     function test_swarmShareAndClaimsArriveWhole() public {
         factory.move(token, DISTRIBUTOR, SUPPLY / 10);
         assertEq(token.balanceOf(DISTRIBUTOR), SUPPLY / 10);

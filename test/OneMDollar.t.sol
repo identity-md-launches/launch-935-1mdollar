@@ -52,6 +52,8 @@ contract OneMDollarTest is Test {
         new OneMDollar(POOL, address(0), MANAGER);
         vm.expectRevert(OneMDollar.InvalidFeeRecipient.selector);
         new OneMDollar(POOL, MANAGER, MANAGER);
+        vm.expectRevert(OneMDollar.InvalidFeeRecipient.selector);
+        new OneMDollar(POOL, address(this), MANAGER);
         vm.expectRevert(OneMDollar.InvalidLiquidityPool.selector);
         new OneMDollar(address(0), TREASURY, MANAGER);
         vm.expectRevert(OneMDollar.InvalidLiquidityPool.selector);
@@ -93,11 +95,12 @@ contract OneMDollarTest is Test {
 
     function test_buyTaxesPoolOutput() public {
         _fundPool(100 ether);
+        uint256 treasuryBefore = token.balanceOf(TREASURY);
         vm.prank(POOL);
         assertTrue(token.transfer(ALICE, 100 ether));
         assertEq(token.balanceOf(POOL), 0);
         assertEq(token.balanceOf(ALICE), 1 ether);
-        assertEq(token.balanceOf(TREASURY), 99 ether);
+        assertEq(token.balanceOf(TREASURY) - treasuryBefore, 99 ether);
     }
 
     function test_deployerHasNoSpecialTaxExemption() public {
@@ -155,9 +158,7 @@ contract OneMDollarTest is Test {
         assertEq(token.balanceOf(TREASURY), 99 ether);
     }
 
-    function test_poolManagerEndpointsAlwaysReceiveFullAmounts() public {
-        _fundPool(100 ether);
-        vm.prank(POOL);
+    function test_poolManagerWalletEndpointsReceiveFullAmounts() public {
         token.transfer(MANAGER, 100 ether);
         vm.prank(MANAGER);
         token.transfer(ALICE, 100 ether);
@@ -169,6 +170,19 @@ contract OneMDollarTest is Test {
         token.transferFrom(ALICE, MANAGER, 100 ether);
         assertEq(token.balanceOf(MANAGER), 100 ether);
         assertEq(token.balanceOf(TREASURY), 0);
+    }
+
+    function test_poolManagerEndpointsStillPayPoolTax() public {
+        token.transfer(MANAGER, 100 ether);
+        vm.prank(MANAGER);
+        token.transfer(POOL, 100 ether);
+        assertEq(token.balanceOf(POOL), 1 ether);
+        assertEq(token.balanceOf(TREASURY), 99 ether);
+        vm.prank(POOL);
+        token.transfer(MANAGER, 1 ether);
+        assertEq(token.balanceOf(POOL), 0);
+        assertEq(token.balanceOf(MANAGER), 0.01 ether);
+        assertEq(token.balanceOf(TREASURY), 99.99 ether);
     }
 
     function test_approvalReplacementRevocationAndInfiniteAllowance() public {
@@ -254,10 +268,11 @@ contract OneMDollarTest is Test {
 
     function test_poolSelfTransferChargesFeeAndWalletSelfTransferDoesNot() public {
         _fundPool(100 ether);
+        uint256 treasuryBefore = token.balanceOf(TREASURY);
         vm.prank(POOL);
         token.transfer(POOL, 100 ether);
         assertEq(token.balanceOf(POOL), 1 ether);
-        assertEq(token.balanceOf(TREASURY), 99 ether);
+        assertEq(token.balanceOf(TREASURY) - treasuryBefore, 99 ether);
         token.transfer(ALICE, 100 ether);
         vm.prank(ALICE);
         token.transfer(ALICE, 100 ether);
@@ -308,13 +323,14 @@ contract OneMDollarTest is Test {
     }
 
     function testFuzz_buysConserveSupplyAndApplyExactFee(uint256 amount) public {
-        amount = bound(amount, 0, SUPPLY);
+        amount = bound(amount, 0, SUPPLY / 100);
         _fundPool(amount);
+        uint256 treasuryBefore = token.balanceOf(TREASURY);
         vm.prank(POOL);
         token.transfer(ALICE, amount);
         uint256 net = (amount + 99) / 100;
         assertEq(token.balanceOf(ALICE), net);
-        assertEq(token.balanceOf(TREASURY), amount - net);
+        assertEq(token.balanceOf(TREASURY) - treasuryBefore, amount - net);
         assertEq(token.balanceOf(POOL), 0);
         assertEq(token.balanceOf(address(this)) + token.balanceOf(ALICE) + token.balanceOf(TREASURY), SUPPLY);
     }
@@ -330,8 +346,7 @@ contract OneMDollarTest is Test {
     }
 
     function _fundPool(uint256 amount) internal {
-        token.transfer(MANAGER, amount);
-        vm.prank(MANAGER);
-        token.transfer(POOL, amount);
+        // Funding is also taxable: send the gross amount needed for this exact net balance.
+        token.transfer(POOL, amount * 100);
     }
 }

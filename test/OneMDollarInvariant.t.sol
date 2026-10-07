@@ -32,7 +32,7 @@ contract TransferHandler is Test {
         }
 
         uint256 fee;
-        if ((fromIndex == 3 || toIndex == 3) && fromIndex != 5 && toIndex != 5) {
+        if (fromIndex == 3 || toIndex == 3) {
             fee = amount - (amount + 99) / 100;
         }
         // Apply aggregate balance changes, including aliased sender, receiver, and treasury.
