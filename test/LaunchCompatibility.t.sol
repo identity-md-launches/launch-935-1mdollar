@@ -41,6 +41,27 @@ contract LaunchCompatibilityTest is Test {
         assertEq(token.totalSupply(), SUPPLY);
         assertEq(token.balanceOf(address(factory)), SUPPLY);
         assertEq(token.balanceOf(address(this)), 0);
+        assertFalse(token.poolTaxEnabled());
+    }
+
+    function test_factoryLaunchFundsPoolUntaxedThenTreasuryActivates() public {
+        factory.move(token, POOL, 1_000 ether);
+        factory.move(token, HOLDER, 100 ether);
+        assertEq(token.balanceOf(POOL), 1_000 ether);
+        assertEq(token.balanceOf(TREASURY), 0);
+        vm.expectRevert(OneMDollar.UnauthorizedTaxActivation.selector);
+        vm.prank(address(factory));
+        token.enablePoolTax();
+        vm.prank(TREASURY);
+        token.enablePoolTax();
+        vm.prank(POOL);
+        token.transfer(CLAIMANT, 100 ether);
+        vm.prank(HOLDER);
+        token.transfer(POOL, 100 ether);
+        assertEq(token.balanceOf(CLAIMANT), 1 ether);
+        assertEq(token.balanceOf(POOL), 901 ether);
+        assertEq(token.balanceOf(TREASURY), 198 ether);
+        assertEq(token.totalSupply(), SUPPLY);
     }
 
     function test_factoryCannotBeFeeRecipient() public {
@@ -159,6 +180,10 @@ contract LaunchCompatibilityTest is Test {
         trader.swap(key, !tokenIsZero, -0.01 ether);
         uint256 bought = token.balanceOf(address(trader));
         assertGt(bought, 0);
+        // The launch settles and a trader buys before the treasury activates the separate venue's tax.
+        assertFalse(token.poolTaxEnabled());
+        vm.prank(TREASURY);
+        token.enablePoolTax();
         // Token balance is bounded by the fixed 1e27 supply, which fits int256.
         trader.swap(key, tokenIsZero, -int256(bought));
         assertEq(token.balanceOf(address(trader)), 0);
@@ -169,6 +194,15 @@ contract LaunchCompatibilityTest is Test {
             paired == address(0) ? address(trader).balance : TestPairToken(paired).balanceOf(address(trader));
         assertGt(pairAfter, 9.99 ether);
         assertLt(pairAfter, 10 ether);
+
+        // Both directions remain compatible with real v4 settlement after activation.
+        trader.swap(key, !tokenIsZero, -0.01 ether);
+        bought = token.balanceOf(address(trader));
+        assertGt(bought, 0);
+        trader.swap(key, tokenIsZero, -int256(bought));
+        assertEq(token.balanceOf(address(trader)), 0);
+        assertEq(token.balanceOf(address(manager)), seeded);
+        assertEq(token.balanceOf(TREASURY), 0);
 
         factory.move(token, OTHER, token.balanceOf(address(factory)));
         assertEq(token.balanceOf(OTHER), SUPPLY - SUPPLY / 10 - seeded);

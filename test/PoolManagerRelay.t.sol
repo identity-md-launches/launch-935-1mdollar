@@ -66,6 +66,9 @@ contract PoolManagerRelayTest is Test {
         manager = new PoolManager(address(this));
         address predictedVenue = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
         token = new OneMDollar(predictedVenue, TREASURY, address(manager));
+        // Existing accounting suites exercise the permanently activated phase.
+        vm.prank(token.feeRecipient());
+        token.enablePoolTax();
         venue = new RelayTestVenue(token);
         assertEq(address(venue), predictedVenue);
         trader = new RelayTestTrader(manager, token, venue);

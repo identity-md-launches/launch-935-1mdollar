@@ -1,135 +1,130 @@
 # 1MDollar (1MD)
 
-`src/OneMDollar.sol:OneMDollar` is a fixed-supply ERC-20 with a 99% fee on
-transfers into or out of one immutable liquidity-pool address. Ordinary wallet
-transfers are untaxed. All 1,000,000,000 tokens (18 decimals) are minted once to
-the constructor's `msg.sender`.
+`src/OneMDollar.sol:OneMDollar` is a fixed-supply ERC-20 that **starts with no
+transfer fee**, including transfers to and from its configured liquidity pool.
+After launch, the fixed treasury calls `enablePoolTax()` once to permanently
+activate a **99% token transfer fee** at that pool. Ordinary wallet transfers
+remain untaxed. All 1,000,000,000 tokens (18 decimals) are minted once to the
+constructor's `msg.sender`; activation neither moves tokens nor changes supply.
 
-**Launch constraint:** the supplied launch checks require the Uniswap v4
-PoolManager to settle the entire nominal transfer amount. A 99% transfer tax on
-that manager would break those checks and swaps. This implementation therefore
-taxes a **separate configured pool**. Transfers involving that pool are taxed
-even when the other endpoint is the launch PoolManager. The constructor rejects
-using that manager as the taxed pool. The launch's v4 pool itself has **no token
-transfer tax**.
-This is the explicit interpretation used to reconcile the request with the
-checks; it does not implement a 99% tax on the launch pool itself. Requiring that
-would need a change to the launch design and its acceptance checks.
+This assignment changes source and local tests only. Nothing is deployed,
+redeployed, replaced or re-minted, and no transactions are broadcast. The project
+history describes Ethereum mainnet launch 935 as parked and supplies no live token
+address. This non-upgradeable source change cannot alter an already deployed token;
+any existing deployment retains its original behavior. Deployment status and the
+available code must be confirmed by the network operator without replacing a live token.
 
-**Unresolved deployment requirement:** do not launch this as a token that taxes
-the v4 launch pool. The requester must resolve that scope conflict with the
-network, or explicitly accept the separate taxable venue before deployment.
-No production taxable venue was supplied. Test addresses such as `0x1001` are
-fixtures, not deployment parameters; a placeholder without a working venue
-does not deliver the requested pool economics. A buy-only manager tax would
-change the agreed two-direction policy and also tax manager withdrawals; it is
-not introduced by this revision. A pool-layer fee requires a different launch
-integration. There is no `launch.json` in this revision's input tree to validate
-or correct.
+## Launch and activation
 
-## Transfer behavior and assumptions
+1. Confirm the constructor parameters and that the treasury can call the token.
+   Deployment starts with `poolTaxEnabled() == false`.
+2. Complete launch funding, liquidity seeding, distributions and initial trading
+   while transfers deliver their full nominal amount. Neither the deployer nor
+   launch factory can activate the tax unless it is the treasury (the constructor
+   prohibits the deployer from being the treasury).
+3. The treasury custodian verifies that launch has completed, the configured
+   taxable venue exists and supports taxed transfers, and the intended initial
+   liquidity is funded. Publish the activation timing and economics to traders.
+4. The treasury itself calls `enablePoolTax()` on the correct token. Check the
+   receipt for `PoolTaxEnabled(liquidityPool, feeRecipient)` and confirm
+   `poolTaxEnabled() == true` before presenting the fee as active.
 
-The brief does not specify tax direction or destination. The assumptions here
-are both buys and sells, with fees paid in 1MD to a fixed treasury. There is no
-burn, redistribution, automatic swap, or conversion to ETH.
+**Timing is an operational trust assumption.** There is no supplied launch oracle,
+completion callback, activation timestamp or automatic launch detector. The treasury
+can activate early or leave the tax disabled indefinitely. Only its address is
+accepted as `msg.sender` (not `tx.origin`). Use a controlled treasury, preferably a
+multisig capable of making arbitrary contract calls. A passive recipient contract
+that can only receive tokens cannot perform activation. Treasury authority is fixed
+and cannot be transferred or recovered by the token if access is lost.
 
-| Transfer endpoints | Fee |
-| --- | --- |
-| Either endpoint is the configured taxable pool, including a transfer to/from the launch PoolManager | 99% of gross amount, rounded down in minor units |
-| Launch PoolManager transfers with no taxable-pool endpoint | 0 |
-| All other endpoints | 0 |
+Activation is one-way: subsequent authorized calls revert with
+`PoolTaxAlreadyEnabled`; other callers revert with `UnauthorizedTaxActivation`.
+There is no disable function, fee-rate setter, pool/treasury setter or exemption
+list. Activation affects subsequent transfers, including spending approvals granted
+before launch; it does not retroactively charge earlier transfers or existing pool
+balances. Transactions execute under the state at their execution time, so ordering
+around activation changes the received amount. Routers must protect actual received
+amounts and users must review outstanding approvals before activation.
 
-For a taxable transfer of `amount`, `fee = floor(amount * 9900 / 10000)`;
-the receiver gets `amount - fee`. For example, a 100 1MD sale delivers 1 1MD to
-the pool and 99 1MD to the treasury. A 100 1MD pool output delivers 1 1MD to the
-buyer. The sender must hold the gross amount. `transferFrom` requires and spends
-the gross allowance. Standard OpenZeppelin unlimited allowances remain unchanged.
-Approvals themselves have no tax, and the spender's identity does not determine
-taxability.
+## Pool scope and compatibility
 
-Fees are rounded down, so transferring one minor unit charges zero fee; splitting
-transfers can exploit this rounding. This is minor-unit precision, not a fee
-minimum. Zero transfers succeed and emit `Transfer`. A pool-to-itself transfer
-pays the fee; an ordinary self-transfer does not. If the treasury is a transfer
-endpoint, its fee credit and transfer credit/debit are combined normally. It must
-still hold the gross amount when sending. Taxed transfers emit the two nonzero
-fee/net `Transfer` legs and a `PoolTax` event; when the fee is zero, only the
-ordinary `Transfer` event is emitted.
+The existing project uses a **separate taxable liquidity-pool address**, distinct
+from the Uniswap v4 launch PoolManager. This revision preserves that scope and
+changes when the tax begins. The v4 launch manager remains untaxed before and after
+activation unless a transfer's other endpoint is the separately configured pool.
+This does **not** activate a fee on the v4 launch pool itself: v4 holds multiple
+pools at one manager address, and its nominal settlement is incompatible with this
+99% transfer tax. A pool-specific v4 AMM fee/hook is outside this implementation.
+The constructor continues to reject using the manager as the taxable endpoint.
 
-The token sees addresses, not swaps: adding/removing liquidity, donations and
-direct transfers involving the taxable pool also pay tax. Other pools are not
-automatically detected or taxed. The deployer has no special exemption at the
-taxable pool. Routing a taxable-pool transfer through the manager still pays
-the fee. Trading at other venues is untaxed; this is not a guarantee of a 99%
-tax on all market activity.
+Before activation all transfers are untaxed. After activation, when either endpoint
+is `liquidityPool`, `fee = floor(amount * 9900 / 10000)` is credited in 1MD to
+`feeRecipient`, and the receiver gets `amount - fee`. For 100 1MD, that is 99 1MD
+for the treasury and 1 1MD for the receiver, in both buy and sell directions.
+Fees are not burned, swapped, converted to ETH or redistributed automatically.
 
-The treasury receives ledger credits, with no external calls or recipient hooks.
-It can spend its own tokens using ordinary ERC-20 operations. There is no owner,
-tax setter, exemption setter, pause, blacklist, seizure, mint, burn, upgrade,
-rescue, or post-deployment initialization function. Supply remains exactly
-`1000000000000000000000000000` minor units. Transfers to the zero address revert.
+The sender must hold the gross amount, including a treasury sending to the pool.
+`transferFrom` requires and spends the gross allowance; standard OpenZeppelin
+unlimited allowances remain unchanged. The spender alone does not determine the
+fee. PoolManager relays to/from the taxable pool still pay the fee. Other pools
+and wallet transfers are untaxed, including treasury wallet transfers. There is
+no special deployer exemption.
 
-## Deployment parameters
+Taxation sees endpoints, not swaps: liquidity additions/removals, donations,
+direct transfers and pool self-transfers pay the fee after activation. Wallet
+self-transfers are untaxed. Zero transfers succeed; one minor unit incurs zero
+fee because of rounding, and splitting transfers can exploit minor-unit rounding.
+Nonzero fees emit `PoolTax` and fee/net ERC-20 `Transfer` events. Treasury credits
+make no external calls or recipient hooks. Zero-address transfers revert. There
+is no mint after construction, burn, pause, blacklist, seizure, upgrade or rescue.
 
-Constructor arguments are static and ordered as follows:
+## Parameters and production responsibilities
+
+The constructor ABI and argument order are unchanged:
 
 ```solidity
 new OneMDollar(liquidityPool, feeRecipient, poolManager);
 ```
 
-| Argument | Required configuration |
+| Parameter | Required configuration |
 | --- | --- |
-| `liquidityPool` | Address of a separate pool whose integration supports fee-on-transfer tokens in both directions. Nonzero; distinct from this token, deployer, treasury and launch manager. |
-| `feeRecipient` | Treasury controlled by the intended fee beneficiary. Nonzero; distinct from this token, pool, manager and deployer. The deployment factory cannot receive fees. |
-| `poolManager` | The actual launch PoolManager, supplied by the deployment network (`$poolManager` in launch constructor arguments). Nonzero; distinct from this token and deployer. |
+| `liquidityPool` | A verified separate venue supporting fee-on-transfer tokens in both directions. Nonzero; distinct from token, deployer, treasury and launch manager. |
+| `feeRecipient` | Controlled treasury receiving token fees and responsible for post-launch activation. Nonzero; distinct from token, pool, manager and deployer. |
+| `poolManager` | Actual launch PoolManager from the deployment network. Nonzero; distinct from token and deployer. |
 
-Addresses are immutable and are not authenticated by the token. A constructor
-code-size check would reject precomputed pool addresses and is deliberately not
-used. The deployer must verify the network, address provenance, treasury control,
-and actual pool integration before launch. No chain addresses, treasury address,
-taxed pool address, paired asset, opening price or allocation parameters were
-provided in this assignment; none have been invented for deployment.
+These addresses are immutable and not authenticated by the token. No code-size
+check is used, allowing a precomputed pool address. Verify chain, address provenance,
+venue implementation, treasury control and treasury ability to spend 1MD and call
+`enablePoolTax()` before launch. The constructor deploying factory receives all
+initial supply, rather than `tx.origin` or the treasury; it remains responsible
+for the swarm share, launch liquidity and remainder payout.
 
-The deployer exclusion prevents fees being stranded in a launch factory that
-only distributes the initial supply. It also applies to direct EOA deployments:
-use a separate controlled treasury. Other recipient contracts are not checked
-for withdrawal support; verifying that the treasury can spend 1MD remains the
-operator's responsibility.
+`launch.json` retains the existing constructor arguments and economic parameters.
+Its first argument, `0x1001`, is an inherited **test fixture, not a verified
+production pool**. The manifest is not ready for production until the network
+operator supplies a functional fee-compatible venue. Treasury and paired-asset
+addresses in the inherited manifest have not been verified in this assignment.
+Its `pool.fee = 3000` describes a separate 0.3% AMM fee, not the 99% token tax.
+No missing addresses, venue, liquidity allocation or activation date are invented.
+Do not treat a placeholder endpoint as delivering production pool economics.
 
-A separately deployed pool may have a precomputed CREATE address that is
-independent of the token's creation bytecode. Reserve that address first, compute
-the token's CREATE2 address using the final arguments, then deploy the pool with
-the intended token. An existing venue that can bind the token appropriately is
-another option. Do not assume that mutually dependent token/pair CREATE2
-predictions can be solved: a conventional pair address often depends on the
-token address, while this token's CREATE2 address includes the pool argument.
-The pool deployment/selection remains the launch operator's responsibility; this
-project supplies the token, not another production AMM.
+A precomputed CREATE pool address can be reserved independently of token creation
+bytecode. Conventional mutually dependent token/pair CREATE2 predictions cannot
+be assumed solvable. Pool selection/deployment remains the network operator's
+responsibility; this project adds no production AMM, deployment script or wallet
+access. The artifact is `src/OneMDollar.sol:OneMDollar`; creation bytecode is followed
+by `abi.encode(liquidityPool, feeRecipient, poolManager)`. Activation is a separate
+post-launch treasury transaction, never a constructor or factory initialization call.
 
-When a factory deploys the token, the entire initial supply belongs to that
-factory, not `tx.origin`, the requester or the treasury. The factory remains
-responsible for transferring the network's 10% swarm share, funding the v4
-position and forwarding the remainder. Distributor claims and requester payouts
-are ordinary untaxed transfers when recipients are not the separate taxable
-pool. No factory lookup or `launchNumber` is required because taxation is limited
-to that single pool. This project does not produce a network launch manifest or
-choose missing economic parameters.
+The network operator must confirm the applicable deployment status, verified source,
+encoded addresses, liquidity parameters and venue compatibility. The treasury
+custodian coordinates and performs activation, monitors its receipt and manages
+fee proceeds. Router operators and liquidity providers must account for the 99%
+loss using measured balance changes and appropriate minimum received amounts.
+An independent adversarial review remains necessary before release with others'
+funds. Local tests are not a security audit.
 
-Use the fully qualified artifact `src/OneMDollar.sol:OneMDollar`. To inspect the
-deployment ABI and creation bytecode locally:
-
-```sh
-forge inspect src/OneMDollar.sol:OneMDollar abi
-forge inspect src/OneMDollar.sol:OneMDollar bytecode
-```
-
-The deployment payload is the compiled creation bytecode followed by
-`abi.encode(liquidityPool, feeRecipient, poolManager)`. There are no additional
-initialization calls. Review the final encoded addresses and predicted token
-address before the network deployer submits anything. No deployment, broadcast
-or wallet access is performed by this project.
-
-## Build and validation
+## Validation
 
 ```sh
 forge build
@@ -137,49 +132,23 @@ forge test
 forge fmt --check
 ```
 
-`foundry.toml` pins Solidity **0.8.26**, targets Cancun, enables the optimizer
-with 200 runs and sets `bytecode_hash = "none"`. FFI and filesystem cheatcode
-permissions are disabled. All imported Solidity dependencies are ordinary files
-under `lib/`; there are no submodules, package installs, RPCs, environment
-variables or network reads needed to build or run tests with the pinned compiler
-available. Dependency commits are recorded in `DEPENDENCIES.json` and upstream
-licenses accompany the vendored sources. OpenZeppelin v5.0.2 supplies the ERC-20
-implementation; Uniswap v4 and Solmate are used only by local integration tests.
+The existing configuration pins Solidity 0.8.26, Cancun, optimizer 200 runs and
+`bytecode_hash = "none"`; it has not been modified. Existing vendored dependencies
+are ordinary files in `lib/`, recorded in `DEPENDENCIES.json`. No new dependency,
+network, RPC, environment variable, FFI or filesystem cheatcode is required by tests.
 
-The delivered tests cover:
+Tests cover fee-free launch, real CREATE2 factory deployment, funding and trading,
+treasury-only irreversible activation and its event, unchanged balances/allowances
+at activation, existing liquidity/approval taxation, both directions and delegation,
+rounding, gross spending and atomic failure in both phases. Existing unit,
+adversarial, allowance invariant and real-manager relay tests exercise the active
+phase. Transfer invariants interleave untaxed/taxed direct and delegated transfers
+with activation, checking conservation and monotonic activation. Real local v4
+integration seeds and buys before activation, then buys/sells after activation for
+native and ERC-20 pairs, confirming its settlement remains intact. See
+`test/TESTING.md` for further coverage.
 
-- Metadata, complete constructor mint, invalid addresses and immutable settings.
-- Both tax directions, wallets, other venues, taxable manager relays, treasury and
-  self-transfer aliases, gross allowances, rounding, zero transfers and events.
-- Rejected transfers, insufficient gross balances/allowances, rollback, approval
-  revocation, and attempts to mint, freeze, seize or reconfigure the token.
-- 512 cases per fuzz test and 128 invariant sequences of 64 calls, checking a
-  balance model and conservation across direct and delegated transfers.
-- A real local Uniswap v4 PoolManager with a CREATE2 factory, single-sided
-  seeding, ordinary-trader buys/sells for native and ERC-20 pairs, swarm claims,
-  requester payouts, runtime size and forbidden-opcode checks.
-- Real manager `unlock`/`sync`/`settle`/`take` relays in both directions, checking
-  exact fees, net receipts, events and preservation of existing manager reserves.
-
-`test/LaunchCompatibility.t.sol` reproduces the relevant token properties from
-the pinned floor without environment variables. It is not a run of the original
-protected harness: that harness requires network-specific environment values
-and launch helper contracts that were not included here. The local integration
-uses a hookless pool; network initialization-guard behavior is outside this
-token's implementation. The original network launch verification still belongs
-to the independent verifier.
-
-## Operational responsibilities
-
-The treasury custodian manages the fee proceeds. Liquidity providers and router
-operators must account for the 99% loss and use measured balance changes and
-appropriate minimum received amounts. The separately taxed venue must support
-fee-on-transfer tokens; the tested v4 launch is deliberately untaxed. Publish
-these economics and the scope resolution before users trade.
-
-The launch operator must verify deployed source/constructor arguments and
-confirm all configured addresses and liquidity parameters. Changing the treasury,
-taxed pool, manager or fee requires deploying a new token. An independent
-adversarial review is required before release with others' funds. The local work
-includes compilation, unit/fuzz/invariant tests and v4 integration tests;
-Slither, Mythril, public-network tests and an independent audit were not run.
+These local integrations do not run the network's protected launch harness or
+verify production addresses. Slither, Mythril, public-chain tests and an independent
+audit were not run. Build, unit, fuzz, invariant and local v4 integration checks
+are the validation performed here.

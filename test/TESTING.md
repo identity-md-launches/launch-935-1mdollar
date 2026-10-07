@@ -1,6 +1,25 @@
 # Additional adversarial coverage
 
-These tests extend the existing token and launch suites without changing their fixtures.
+The existing fee-accounting suites explicitly activate the fee in setup; the launch
+suite starts with the fee disabled. No tests use environment variables or RPCs.
+
+`PoolTaxActivation.t.sol` covers fee-free funding and both trade directions, the
+activation event, unchanged balances and pre-existing approvals at activation,
+unauthorized callers (including factory/deployer, pool and manager), repeated
+activation, absent disable/rate setters, and atomic balance/allowance failures
+in both phases. A fuzz property compares direct and delegated transfers across
+the switch, including zero, dust and full available balances.
+
+`OneMDollarInvariant.t.sol` interleaves activation with direct/delegated transfers
+using a separate ghost activation flag and checks fixed supply, exact balance
+effects and permanent activation. The treasury is impersonated only to exercise
+its authorized call; production requires an actual treasury transaction.
+
+`LaunchCompatibility.t.sol` deploys through a real local CREATE2 factory with
+the fee off. Native/ERC-20 v4 pools are seeded and bought before activation,
+then bought/sold after activation; the separately configured taxable venue alone
+is taxed. A factory-funded pool lifecycle also verifies full initial seeding
+and 99% fees on both directions after treasury activation.
 
 `OneMDollarAdversarial.t.sol` runs four properties with 1,000 fuzz cases each:
 

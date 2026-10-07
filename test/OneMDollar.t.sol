@@ -21,6 +21,9 @@ contract OneMDollarTest is Test {
 
     function setUp() public {
         token = new OneMDollar(POOL, TREASURY, MANAGER);
+        // Existing accounting suites exercise the permanently activated phase.
+        vm.prank(token.feeRecipient());
+        token.enablePoolTax();
     }
 
     function test_metadataAndEntireSupplyMintedOnceToDeployer() public view {

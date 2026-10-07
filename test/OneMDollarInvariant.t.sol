@@ -7,6 +7,7 @@ import {OneMDollar} from "../src/OneMDollar.sol";
 contract TransferHandler is Test {
     OneMDollar public immutable token;
     address[6] public actors;
+    bool public activated;
 
     constructor(OneMDollar token_) {
         token = token_;
@@ -32,7 +33,7 @@ contract TransferHandler is Test {
         }
 
         uint256 fee;
-        if (fromIndex == 3 || toIndex == 3) {
+        if (activated && (fromIndex == 3 || toIndex == 3)) {
             fee = amount - (amount + 99) / 100;
         }
         // Apply aggregate balance changes, including aliased sender, receiver, and treasury.
@@ -52,6 +53,13 @@ contract TransferHandler is Test {
             assertEq(token.balanceOf(actors[i]), expected[i], "balance model");
         }
     }
+
+    function activate() external {
+        if (activated) return;
+        vm.prank(actors[4]);
+        token.enablePoolTax();
+        activated = true;
+    }
 }
 
 contract OneMDollarInvariantTest is Test {
@@ -64,8 +72,9 @@ contract OneMDollarInvariantTest is Test {
         handler = new TransferHandler(token);
         token.transfer(address(handler), SUPPLY);
         targetContract(address(handler));
-        bytes4[] memory selectors = new bytes4[](1);
+        bytes4[] memory selectors = new bytes4[](2);
         selectors[0] = TransferHandler.move.selector;
+        selectors[1] = TransferHandler.activate.selector;
         targetSelector(FuzzSelector(address(handler), selectors));
     }
 
@@ -78,5 +87,6 @@ contract OneMDollarInvariantTest is Test {
         assertEq(token.totalSupply(), SUPPLY);
         assertEq(token.balanceOf(address(0)), 0);
         assertEq(token.balanceOf(address(this)), 0);
+        assertEq(token.poolTaxEnabled(), handler.activated());
     }
 }

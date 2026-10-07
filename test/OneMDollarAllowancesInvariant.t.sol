@@ -15,6 +15,9 @@ contract OneMDollarAllowancesInvariantTest is Test {
 
     function setUp() public {
         token = new OneMDollar(address(0x1001), address(0x1002), address(0x1003));
+        // Existing accounting suites exercise the permanently activated phase.
+        vm.prank(token.feeRecipient());
+        token.enablePoolTax();
         handler = new AllowanceHandler(token);
         address manager = token.poolManager();
         token.transfer(manager, SUPPLY);
