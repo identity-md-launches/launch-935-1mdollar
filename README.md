@@ -1,5 +1,11 @@
 # 1MDollar (1MD)
 
+For the request to launch the existing token, see [the launch operator handoff](LAUNCH.md)
+and `script/PrepareLaunch.s.sol`. The read-only preflight checks the existing token
+and prepares v4 initialization calldata where needed. The supplied record remains
+parked: no token address or verified taxable venue was provided, and this assignment
+does not broadcast transactions or deploy a replacement token.
+
 `src/OneMDollar.sol:OneMDollar` is a fixed-supply ERC-20 that **starts with no
 transfer fee**, including transfers to and from its configured liquidity pool.
 After launch, the fixed treasury calls `enablePoolTax()` once to permanently

@@ -1,5 +1,14 @@
 # Additional adversarial coverage
 
+`PrepareLaunch.t.sol` checks the read-only launch script against an existing local
+token and real v4 PoolManager. It covers valid native/ERC-20 configurations, both
+currency orders, non-18-decimal pairs, accepted initialization calldata, initialized
+and funded pools, caller-independent static execution and unchanged ledgers. Failure
+tests reject wrong chains, missing code, the inherited placeholder pool, unexpected
+token properties, immutable-address mismatches, active tax, invalid parameters and
+insufficient funding. The balance threshold is fuzzed at success and failure boundaries.
+All fixtures are local; passing does not verify production addresses or complete a launch.
+
 The existing fee-accounting suites explicitly activate the fee in setup; the launch
 suite starts with the fee disabled. No tests use environment variables or RPCs.
 
