@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
+import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import {PoolManager} from "v4-core/src/PoolManager.sol";
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "v4-core/src/interfaces/callback/IUnlockCallback.sol";
@@ -50,6 +51,7 @@ contract RelayTestTrader is IUnlockCallback {
     }
 }
 
+/// forge-config: default.fuzz.runs = 1000
 contract PoolManagerRelayTest is Test {
     PoolManager internal manager;
     OneMDollar internal token;
@@ -94,5 +96,74 @@ contract PoolManagerRelayTest is Test {
         assertEq(token.balanceOf(TREASURY) - treasuryBefore, 99 ether);
         assertEq(token.balanceOf(address(manager)), MANAGER_RESERVE);
         assertEq(token.totalSupply(), token.INITIAL_SUPPLY());
+    }
+
+    function testFuzz_relayMatchesDirectTransfer(bool sell, uint256 amount) public {
+        amount = bound(amount, 0, _fundingLimit(sell));
+        _fundRelay(sell, amount);
+        _assertRelayMatchesDirect(sell, amount);
+    }
+
+    function testFuzz_relayOverdrawRollsBackAndAllowsRetry(bool sell, uint256 held, uint256 excess) public {
+        held = bound(held, 0, _fundingLimit(sell));
+        uint256 amount = bound(excess, held + 1, type(uint256).max);
+        _fundRelay(sell, held);
+        address from = sell ? address(trader) : address(venue);
+        bytes32 before = keccak256(abi.encode(_balances(), token.totalSupply()));
+
+        vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, from, held, amount));
+        trader.relay(sell, amount);
+        assertEq(keccak256(abi.encode(_balances(), token.totalSupply())), before, "failed relay changed balances");
+
+        // A reverted unlock must not poison the next sync/settle/take cycle.
+        _assertRelayMatchesDirect(sell, held);
+    }
+
+    function test_relayRoundingEdgesAndEntireAvailableBalance() public {
+        uint256[7] memory edges = [uint256(0), 1, 2, 99, 100, 101, 0];
+        for (uint256 direction; direction < 2; ++direction) {
+            bool sell = direction == 0;
+            edges[6] = _fundingLimit(sell);
+            for (uint256 i; i < edges.length; ++i) {
+                uint256 snapshot = vm.snapshotState();
+                _fundRelay(sell, edges[i]);
+                _assertRelayMatchesDirect(sell, edges[i]);
+                assertTrue(vm.revertToState(snapshot));
+            }
+        }
+    }
+
+    function _assertRelayMatchesDirect(bool sell, uint256 amount) internal {
+        uint256 snapshot = vm.snapshotState();
+        vm.prank(sell ? address(trader) : address(venue));
+        assertTrue(token.transfer(sell ? address(venue) : address(trader), amount));
+        uint256[5] memory direct = _balances();
+        assertTrue(vm.revertToState(snapshot));
+
+        trader.relay(sell, amount);
+        assertEq(abi.encode(_balances()), abi.encode(direct), "manager routing changed transfer economics");
+        assertEq(token.balanceOf(address(manager)), MANAGER_RESERVE, "relay consumed existing reserves");
+        assertEq(token.totalSupply(), 1_000_000_000 ether);
+    }
+
+    function _fundingLimit(bool sell) internal pure returns (uint256) {
+        uint256 available = 1_000_000_000 ether - MANAGER_RESERVE;
+        return sell ? available : available / 100;
+    }
+
+    function _fundRelay(bool sell, uint256 amount) internal {
+        address from = sell ? address(trader) : address(venue);
+        assertTrue(token.transfer(from, sell ? amount : amount * 100));
+        assertEq(token.balanceOf(from), amount, "fixture must fund the gross relay amount");
+    }
+
+    function _balances() internal view returns (uint256[5] memory) {
+        return [
+            token.balanceOf(address(this)),
+            token.balanceOf(address(trader)),
+            token.balanceOf(address(venue)),
+            token.balanceOf(address(manager)),
+            token.balanceOf(TREASURY)
+        ];
     }
 }

@@ -34,6 +34,14 @@ A second deterministic sequence checks direct and delegated transfers between
 the manager and pool in both directions, comparing the ledger after each transfer.
 All three invariants are also checked at the end of setup.
 
+`PoolManagerRelay.t.sol` additionally runs two properties with 1,000 fuzz cases
+each against the real local manager. Routing a transfer through `unlock`, `sync`,
+`settle`, and `take` must match a direct transfer across all five tracked accounts.
+An overdraw must return the exact insufficient-balance error, preserve balances
+and supply, and permit a valid retry without consuming existing manager reserves.
+Deterministic relay cases cover zero, one, two, 99, 100, 101 minor units and the
+entire balance obtainable through real taxed funding, in both directions.
+
 The tax oracle expresses the recipient's one-percent share as ceiling division,
 independent of the implementation's fee multiplication. Every transfer involving
 the configured pool is taxed, including transfers to or from the launch PoolManager.
