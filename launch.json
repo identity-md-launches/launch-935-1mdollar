@@ -1,0 +1,24 @@
+{
+  "kind": "custom_token",
+  "token": {
+    "contract": "OneMDollar",
+    "name": "1MDollar",
+    "symbol": "1MD",
+    "decimals": 18,
+    "constructorArgs": [
+      "0x0000000000000000000000000000000000000000000000000000000000001001",
+      "0x00000000000000000000000070bcbde387539d95ffe6d43edbf7c6aa2da87a09",
+      "$poolManager"
+    ],
+    "totalSupply": "1000000000000000000000000000"
+  },
+  "contracts": [],
+  "pool": {
+    "pairedCurrency": "0xd34a99bc0f67ae1bbd63c660e6d0b0dd03e263b7",
+    "fee": 3000,
+    "tickSpacing": 60,
+    "initialPrice": "79228162514264337593543950336"
+  },
+  "economics": {"poolBps":8600,"initialMarketCapWei":"2680000000000000000000","remainderTo":"0x70bcbde387539d95ffe6d43edbf7c6aa2da87a09"},
+  "notes": "OneMDollar is implemented in src/OneMDollar.sol. Its constructor takes liquidityPool_, feeRecipient_, poolManager_ in that order and mints the entire fixed supply once to msg.sender. The first two arguments are ABI-encoded address words; fees go to the requester's remainderTo address. The configured taxable endpoint is 0x0000000000000000000000000000000000001001, the address used in the accepted tests. No production taxable-pool address was supplied, and the accepted tree contains no separate pool implementation or evidence of a deployed venue at that address. This manifest deploys only OneMDollar. The token charges floor(amount * 9900 / 10000) on transfers into or out of that configured endpoint, unless either transfer endpoint is the launch PoolManager. Ordinary transfers and transfers involving the launch PoolManager are untaxed; the launch's v4 pool therefore has no 99% token transfer tax. The taxable endpoint, fee recipient and manager are immutable. There are no initialization calls, further minting or administrative setters. The 3000 pool fee is the separate 0.3% AMM fee, with tick spacing 60. initialPrice is the accepted integration tests' 2^96 reference value, for provenance only; the deployer derives the actual opening price from initialMarketCapWei, totalSupply and currency ordering. A functional separate taxable venue at the configured address is not established by this manifest."
+}
