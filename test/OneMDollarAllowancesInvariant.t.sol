@@ -29,6 +29,9 @@ contract OneMDollarAllowancesInvariantTest is Test {
             handler.approve(i, (i + 1) % 6, SUPPLY / 12, 2);
             handler.approve(i, (i + 2) % 6, 0, 1);
         }
+        invariant_balancesMatchPersistentGhostLedger();
+        invariant_onlyAuthorizedGrossSpendsReduceAllowances();
+        invariant_supplyCannotLeakToUntrackedAccounts();
         targetContract(address(handler));
         bytes4[] memory selectors = new bytes4[](7);
         selectors[0] = AllowanceHandler.approve.selector;
@@ -89,5 +92,38 @@ contract OneMDollarAllowancesInvariantTest is Test {
         assertEq(handler.nonzeroTransfers(), 1);
         assertEq(handler.nonzeroSpends(), 2);
         assertEq(handler.rejectedCalls(), 5);
+    }
+
+    function test_handlerTaxesManagerPoolTransfersInBothDirections() public {
+        address manager = handler.actors(5);
+        address pool = handler.actors(3);
+        address treasury = handler.actors(4);
+        uint256 managerBefore = token.balanceOf(manager);
+        uint256 poolBefore = token.balanceOf(pool);
+        uint256 treasuryBefore = token.balanceOf(treasury);
+
+        handler.transfer(5, 3, 100 ether, 4);
+        invariant_balancesMatchPersistentGhostLedger();
+        handler.transfer(3, 5, 100 ether, 4);
+        invariant_balancesMatchPersistentGhostLedger();
+        assertEq(token.balanceOf(manager), managerBefore - 99 ether);
+        assertEq(token.balanceOf(pool), poolBefore - 99 ether);
+        assertEq(token.balanceOf(treasury), treasuryBefore + 198 ether);
+
+        handler.approve(5, 2, 100 ether, 2);
+        handler.spend(5, 2, 3, 100 ether, 4);
+        invariant_balancesMatchPersistentGhostLedger();
+        handler.approve(3, 2, 100 ether, 2);
+        handler.spend(3, 2, 5, 100 ether, 4);
+        invariant_balancesMatchPersistentGhostLedger();
+        assertEq(token.balanceOf(manager), managerBefore - 198 ether);
+        assertEq(token.balanceOf(pool), poolBefore - 198 ether);
+        assertEq(token.balanceOf(treasury), treasuryBefore + 396 ether);
+        assertEq(token.allowance(manager, handler.actors(2)), 0);
+        assertEq(token.allowance(pool, handler.actors(2)), 0);
+        invariant_onlyAuthorizedGrossSpendsReduceAllowances();
+        invariant_supplyCannotLeakToUntrackedAccounts();
+        assertEq(handler.nonzeroTransfers(), 2);
+        assertEq(handler.nonzeroSpends(), 2);
     }
 }

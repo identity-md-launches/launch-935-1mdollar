@@ -264,10 +264,39 @@ contract OneMDollarAdversarialTest is Test {
         assertEq(_stateDigest(), before);
     }
 
-    function _fund(address account, uint256 amount) internal {
-        token.transfer(MANAGER, amount);
+    function test_delegatedPoolManagerEndpointsPayTaxAndSpendGrossAllowance() public {
+        token.transfer(MANAGER, 100 ether);
         vm.prank(MANAGER);
-        token.transfer(account, amount);
+        token.approve(ROUTER, 100 ether);
+        vm.prank(ROUTER);
+        assertTrue(token.transferFrom(MANAGER, POOL, 100 ether));
+        assertEq(token.balanceOf(MANAGER), 0);
+        assertEq(token.balanceOf(POOL), 1 ether);
+        assertEq(token.balanceOf(TREASURY), 99 ether);
+        assertEq(token.allowance(MANAGER, ROUTER), 0);
+
+        vm.prank(POOL);
+        token.approve(ROUTER, 1 ether);
+        vm.prank(ROUTER);
+        assertTrue(token.transferFrom(POOL, MANAGER, 1 ether));
+        assertEq(token.balanceOf(POOL), 0);
+        assertEq(token.balanceOf(MANAGER), 0.01 ether);
+        assertEq(token.balanceOf(TREASURY), 99.99 ether);
+        assertEq(token.allowance(POOL, ROUTER), 0);
+        assertEq(token.totalSupply(), SUPPLY);
+    }
+
+    function _fund(address account, uint256 amount) internal {
+        if (account == POOL) {
+            // Isolate spending from seeding fees, retaining full-supply balance edges.
+            // Move fixture balances without changing supply; real funding is tested elsewhere.
+            deal(address(token), address(this), token.balanceOf(address(this)) - amount);
+            deal(address(token), POOL, token.balanceOf(POOL) + amount);
+        } else {
+            token.transfer(account, amount);
+        }
+        assertEq(token.balanceOf(account), amount, "fixture must fund the gross spend");
+        assertEq(token.totalSupply(), SUPPLY);
     }
 
     function _actor(uint8 seed) internal view returns (address) {

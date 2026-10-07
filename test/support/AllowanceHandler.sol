@@ -29,6 +29,10 @@ contract AllowanceHandler is Test {
         for (uint256 i; i < actors.length; ++i) {
             expectedBalance[actors[i]] = i == 0 ? SUPPLY - 5 * (SUPPLY / 6) : SUPPLY / 6;
         }
+        // The manager's initial allocation to the pool is taxable too.
+        uint256 poolNet = (SUPPLY / 6 + 99) / 100;
+        expectedBalance[actors[3]] = poolNet;
+        expectedBalance[actors[4]] += SUPPLY / 6 - poolNet;
     }
 
     function approve(uint8 ownerSeed, uint8 spenderSeed, uint256 amountSeed, uint8 mode) public {
@@ -111,7 +115,7 @@ contract AllowanceHandler is Test {
         // Independent oracle: receiver keeps ceil(gross / 100), without using token constants
         // or copying its multiply-then-divide fee calculation. Aggregate credits handle aliases.
         uint256 net = gross;
-        if ((from == actors[3] || to == actors[3]) && from != actors[5] && to != actors[5]) {
+        if (from == actors[3] || to == actors[3]) {
             net = gross / 100 + (gross % 100 == 0 ? 0 : 1);
         }
         expectedBalance[from] -= gross;
